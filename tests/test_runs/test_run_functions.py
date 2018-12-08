@@ -563,7 +563,9 @@ class TestRun(TestBase):
 
     def test_online_run_metric_score(self):
         openml.config.server = self.production_server
-        run = openml.runs.get_run(5965513) # important to use binary classification task, due to assertions
+        # important to use binary classification task,
+        # due to assertions
+        run = openml.runs.get_run(9864498)
         self._test_local_evaluations(run)
 
     def test_initialize_model_from_run(self):
@@ -625,7 +627,8 @@ class TestRun(TestBase):
             flow_exists = openml.flows.flow_exists(flow.name, flow.external_version)
             self.assertIsInstance(flow_exists, int)
             self.assertGreater(flow_exists, 0)
-            downloaded_flow = openml.flows.get_flow(flow_exists)
+            downloaded_flow = openml.flows.get_flow(flow_exists,
+                                                    reinstantiate=True)
             setup_exists = openml.setups.setup_exists(downloaded_flow)
             self.assertIsInstance(setup_exists, int)
             self.assertGreater(setup_exists, 0)
