@@ -12,6 +12,7 @@ from abc import abstractmethod
 DEPENDENCIES_PATTERN = re.compile(
     '^(?P<name>[\w\-]+)((?P<operation>==|>=|>)(?P<version>(\d+\.)?(\d+\.)?(\d+)?(dev)?[0-9]*))?$')
 
+
 class AbstractConverter(object):
     def __init__(self, model):
         self._external_version = None
