@@ -137,7 +137,7 @@ class ShogunConverter(AbstractConverter):
         # is it a model? If so recursive call
         if ShogunConverter._is_shogun_trainable_model(value):
             rval = ShogunConverter(value).to_flow()
-        elif ShogunConverter._is_shogun_kernel(param_type):
+        elif model.parameter_is_sg_base(name):
             rval = ShogunConverter(value).to_flow()
             # rval = [ShogunConverter._shogun_to_flow(value, name) for name in value.parameter_names()]
         # handle primitive types
@@ -154,11 +154,11 @@ class ShogunConverter(AbstractConverter):
         self._sub_components_explicit.add(parameter_name)
         component_reference = OrderedDict()
         # in shogun for now every serialized object is a function
+        component_reference = OrderedDict()
         component_reference[
             'oml-python:serialized_object'] = 'function'
-        cr_value = OrderedDict()
-        cr_value['key'] = parameter_name
-        cr_value['value'] = "shogun.{}".format(parameter_name)
+        component_reference['key'] = parameter_name
+        component_reference['value'] = "shogun.{}".format(parameter_name)
         self._parameters[parameter_name] = json.dumps(component_reference)
 
     def extract_information_from_model(self):
@@ -192,10 +192,6 @@ class ShogunConverter(AbstractConverter):
     @staticmethod
     def _is_shogun_trainable_model(obj):
         return hasattr(obj, "train")
-
-    @staticmethod
-    def _is_shogun_kernel(type):
-        return type == "shogun::CKernel*"
 
     @property
     def external_version(self):
