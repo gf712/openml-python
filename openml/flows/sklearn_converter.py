@@ -103,7 +103,8 @@ class SKLearnConverter(AbstractConverter):
                     value = SKLearnConverter._flow_to_sklearn(value)
                     step_name = value['step_name']
                     key = value['key']
-                    component =  SKLearnConverter._flow_to_sklearn(components[key], initialize_with_defaults=initialize_with_defaults)
+                    component = SKLearnConverter._flow_to_sklearn(components[key],
+                                                                  initialize_with_defaults=initialize_with_defaults)
                     # The component is now added to where it should be used
                     # later. It should not be passed to the constructor of the
                     # main flow object.
@@ -113,7 +114,7 @@ class SKLearnConverter(AbstractConverter):
                     else:
                         rval = (step_name, component)
                 elif serialized_type == 'cv_object':
-                    rval =  SKLearnConverter._deserialize_cross_validator(value)
+                    rval = SKLearnConverter._deserialize_cross_validator(value)
                 else:
                     raise ValueError('Cannot flow_to_sklearn %s' % serialized_type)
 
@@ -283,7 +284,7 @@ class SKLearnConverter(AbstractConverter):
                     self._parameters[k] = None
 
             self._parameters_meta_info[k] = OrderedDict((('description', None),
-                                                   ('data_type', None)))
+                                                         ('data_type', None)))
 
     def _extract_sklearn_model_information(self, rval, parameter_name):
         # Steps in a pipeline or feature union, or base classifiers in voting classifier
@@ -332,7 +333,6 @@ class SKLearnConverter(AbstractConverter):
         # parameter values still have the same type after
         # deserialization
         self._parameters[parameter_name] = json.dumps(parameter_value)
-
 
     def _extract_openml_flow_information(self, rval, parameter_name):
         """
@@ -473,54 +473,3 @@ class SKLearnConverter(AbstractConverter):
 
 
 #    def run_on_task(self, task):
-
-
-
-def _check_n_jobs(model):
-    """
-    Returns True if the parameter settings of model are chosen s.t. the model
-    will run on a single core (in that case, openml-python can measure runtimes)
-    """
-    def check(param_grid, restricted_parameter_name, legal_values):
-        if isinstance(param_grid, dict):
-            for param, value in param_grid.items():
-                # n_jobs is scikitlearn parameter for paralizing jobs
-                if param.split('__')[-1] == restricted_parameter_name:
-                    # 0 = illegal value (?), 1 / None = use one core,
-                    # n = use n cores,
-                    # -1 = use all available cores -> this makes it hard to
-                    # measure runtime in a fair way
-                    if legal_values is None or value not in legal_values:
-                        return False
-            return True
-        elif isinstance(param_grid, list):
-            for sub_grid in param_grid:
-                if not check(sub_grid, restricted_parameter_name, legal_values):
-                    return False
-            return True
-
-    if not (isinstance(model, sklearn.base.BaseEstimator) or
-            isinstance(model, sklearn.model_selection._search.BaseSearchCV)):
-        raise ValueError('model should be BaseEstimator or BaseSearchCV')
-
-    # make sure that n_jobs is not in the parameter grid of optimization
-    # procedure
-    if isinstance(model, sklearn.model_selection._search.BaseSearchCV):
-        if isinstance(model, sklearn.model_selection.GridSearchCV):
-            param_distributions = model.param_grid
-        elif isinstance(model, sklearn.model_selection.RandomizedSearchCV):
-            param_distributions = model.param_distributions
-        else:
-            if hasattr(model, 'param_distributions'):
-                param_distributions = model.param_distributions
-            else:
-                raise AttributeError('Using subclass BaseSearchCV other than {GridSearchCV, RandomizedSearchCV}. Could not find attribute param_distributions. ')
-            print('Warning! Using subclass BaseSearchCV other than ' \
-                  '{GridSearchCV, RandomizedSearchCV}. Should implement param check. ')
-
-        if not check(param_distributions, 'n_jobs', None):
-            raise PyOpenMLError('openml-python should not be used to '
-                                'optimize the n_jobs parameter.')
-
-    # check the parameters for n_jobs
-    return check(model.get_params(), 'n_jobs', [1, None])

@@ -10,10 +10,12 @@ import warnings
 import sys
 import inspect
 import copy
+import functools
 
 import numpy as np
 import scipy.stats.distributions
 import shogun as sg
+import shogun
 
 import openml
 from openml.flows import OpenMLFlow
@@ -54,10 +56,14 @@ class ShogunConverter(AbstractConverter):
         mixed
         """
         # raise NotImplementedError("")
-        return ShogunConverter._flow_to_shogun(flow, components=None, initialize_with_defaults=False)
+        return ShogunConverter._flow_to_shogun(flow, components=components,
+                                               initialize_with_defaults=False)
 
     @staticmethod
     def _flow_to_shogun(o, components=None, initialize_with_defaults=False):
+
+        print(o, components)
+
         if isinstance(o, six.string_types):
             try:
                 o = json.loads(o)
@@ -70,18 +76,30 @@ class ShogunConverter(AbstractConverter):
             if 'oml-python:serialized_object' in o:
                 serialized_type = o['oml-python:serialized_object']
                 value = o['value']
+                key = o["key"]
                 if serialized_type == 'function':
-                    # rval = self._shogun_deserialize_function(o)
-                    return value
+                    print("deserialize function")
+                    rval = ShogunConverter._deserialize_model(
+                        components[key], initialize_with_defaults)
+                    return rval
                 else:
                     raise ValueError("oml-python:serialized_object", o)
         elif isinstance(o, (bool, int, float, six.string_types)) or o is None:
             rval = o
         elif isinstance(o, OpenMLFlow):
             rval = ShogunConverter._deserialize_model(o, initialize_with_defaults)
+        elif isinstance(o, list):
+            print("is list", o)
+        elif isinstance(o, (np.ndarray, np.generic)):
+            rval = o
         else:
-            raise ValueError(o)
+            raise ValueError("Error with type {}".format(type(o)))
         return rval
+
+    @staticmethod
+    def _shogun_deserialize_function(component, initialize_with_defaults=True):
+        return ShogunConverter._flow_to_shogun(component,
+                                               initialize_with_defaults=initialize_with_defaults)
 
     def to_flow(self):
         """Creates an OpenML flow of the models.
@@ -110,7 +128,7 @@ class ShogunConverter(AbstractConverter):
                                 'python',
                                 self.format_external_version(
                                     'shogun', sg.__version__).replace('==', '_'),
-                                    self._model.get_name()
+                                self._model.get_name()
                                 ],
                           language='English',
                           # TODO fill in dependencies!
@@ -139,7 +157,8 @@ class ShogunConverter(AbstractConverter):
             rval = ShogunConverter(value).to_flow()
         elif model.parameter_is_sg_base(name):
             rval = ShogunConverter(value).to_flow()
-            # rval = [ShogunConverter._shogun_to_flow(value, name) for name in value.parameter_names()]
+            # rval = [ShogunConverter._shogun_to_flow(value, name)
+            # for name in value.parameter_names()]
         # handle primitive types
         else:
             rval = value
@@ -185,8 +204,8 @@ class ShogunConverter(AbstractConverter):
                 self._parameters[param_name] = rval
 
             self._parameters_meta_info[param_name] = \
-            OrderedDict((('description', self._model.parameter_description(param_name)),
-                         ('data_type', self._model.parameter_type(param_name))))
+                OrderedDict((('description', self._model.parameter_description(param_name)),
+                             ('data_type', self._model.parameter_type(param_name))))
         # raise NotImplementedError("")
 
     @staticmethod
@@ -204,7 +223,7 @@ class ShogunConverter(AbstractConverter):
         # sorted concatenation of all modules which are present in this run.
         model_package_version_number = sg.__version__
         external_version = self.format_external_version("shogun",
-                                                    model_package_version_number)
+                                                        model_package_version_number)
         openml_version = self.format_external_version('openml', openml.__version__)
         external_versions = set()
         external_versions.add(external_version)

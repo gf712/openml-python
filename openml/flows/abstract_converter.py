@@ -6,6 +6,8 @@ import re
 import copy
 import sys
 import inspect
+import sklearn
+import shogun as sg
 
 from abc import abstractmethod
 
@@ -162,7 +164,8 @@ class AbstractConverter(object):
         for name in parameters:
             value = parameters.get(name)
             rval = cls.from_flow(value, components=components_, initialize_with_defaults=keep_defaults)
-            parameter_dict[name] = rval
+            if rval is not None:
+                parameter_dict[name] = rval
 
         for name in components:
             if name in parameter_dict:
@@ -170,13 +173,11 @@ class AbstractConverter(object):
             if name not in components_:
                 continue
             value = components[name]
-            rval = cls.from_flow(value, **kwargs)
-            parameter_dict[name] = rval
+            rval = cls.from_flow(value)
 
         module_name = model_name.rsplit('.', 1)
         model_class = getattr(importlib.import_module(module_name[0]),
                               module_name[1])
-
         if keep_defaults:
             # obtain all params with a default
             param_defaults, _ = cls._get_fn_arguments_with_defaults(model_class.__init__)
@@ -190,6 +191,7 @@ class AbstractConverter(object):
                 # constants (i.e., changing them would result in a different flow)
                 if param not in components.keys():
                     del parameter_dict[param]
+        print("instantiating model", model_class(**parameter_dict))
         return model_class(**parameter_dict)
 
     @classmethod
@@ -223,3 +225,57 @@ class AbstractConverter(object):
                                  '%s not satisfied.' % dependency_string)
 
 
+def _check_n_jobs(model):
+    """
+    Returns True if the parameter settings of model are chosen s.t. the model
+    will run on a single core (in that case, openml-python can measure runtimes)
+    """
+
+    def check(param_grid, restricted_parameter_name, legal_values):
+        if isinstance(param_grid, dict):
+            for param, value in param_grid.items():
+                # n_jobs is scikitlearn parameter for paralizing jobs
+                if param.split('__')[-1] == restricted_parameter_name:
+                    # 0 = illegal value (?), 1 / None = use one core,
+                    # n = use n cores,
+                    # -1 = use all available cores -> this makes it hard to
+                    # measure runtime in a fair way
+                    if legal_values is None or value not in legal_values:
+                        return False
+            return True
+        elif isinstance(param_grid, list):
+            for sub_grid in param_grid:
+                if not check(sub_grid, restricted_parameter_name, legal_values):
+                    return False
+            return True
+
+    if (isinstance(model, sklearn.base.BaseEstimator) or
+            isinstance(model, sklearn.model_selection._search.BaseSearchCV)):
+
+        # make sure that n_jobs is not in the parameter grid of optimization
+        # procedure
+        if isinstance(model, sklearn.model_selection._search.BaseSearchCV):
+            if isinstance(model, sklearn.model_selection.GridSearchCV):
+                param_distributions = model.param_grid
+            elif isinstance(model, sklearn.model_selection.RandomizedSearchCV):
+                param_distributions = model.param_distributions
+            else:
+                if hasattr(model, 'param_distributions'):
+                    param_distributions = model.param_distributions
+                else:
+                    raise AttributeError(
+                        'Using subclass BaseSearchCV other than {GridSearchCV, RandomizedSearchCV}. Could not find '
+                        'attribute param_distributions. ')
+                print('Warning! Using subclass BaseSearchCV other than ' \
+                      '{GridSearchCV, RandomizedSearchCV}. Should implement param check. ')
+
+            if not check(param_distributions, 'n_jobs', None):
+                raise PyOpenMLError('openml-python should not be used to '
+                                    'optimize the n_jobs parameter.')
+    elif (isinstance(model, sg.Machine)):
+        return False
+    else:
+        raise ValueError('model should be BaseEstimator or BaseSearchCV')
+
+    # check the parameters for n_jobs
+    return check(model.get_params(), 'n_jobs', [1, None])
