@@ -147,7 +147,6 @@ class AbstractConverter(object):
 
     @classmethod
     def _deserialize_model(cls, flow, keep_defaults):
-        model_name = flow.class_name
         cls._check_dependencies(flow.dependencies)
 
         parameters = flow.parameters
@@ -175,9 +174,8 @@ class AbstractConverter(object):
             value = components[name]
             rval = cls.from_flow(value)
 
-        module_name = model_name.rsplit('.', 1)
-        model_class = getattr(importlib.import_module(module_name[0]),
-                              module_name[1])
+        model_class = cls.get_model_class(flow)
+
         if keep_defaults:
             # obtain all params with a default
             param_defaults, _ = cls._get_fn_arguments_with_defaults(model_class.__init__)
@@ -191,8 +189,12 @@ class AbstractConverter(object):
                 # constants (i.e., changing them would result in a different flow)
                 if param not in components.keys():
                     del parameter_dict[param]
-        print("instantiating model", model_class(**parameter_dict))
         return model_class(**parameter_dict)
+
+    @staticmethod
+    @abstractmethod
+    def get_model_class(model_name):
+        raise NotImplemented("get_class_method has to be implemented")
 
     @classmethod
     def _check_dependencies(cls, dependencies):

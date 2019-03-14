@@ -317,8 +317,8 @@ class OpenMLFlow(object):
             arguments['external_version'].startswith('sklearn==')
             or ',sklearn==' in arguments['external_version']
         ):
-            from .sklearn_converter import flow_to_sklearn
-            model = flow_to_sklearn(flow)
+            from .sklearn_converter import SKLearnConverter
+            model = SKLearnConverter.from_flow(flow)
         else:
             model = None
         flow.model = model

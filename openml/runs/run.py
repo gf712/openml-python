@@ -415,12 +415,19 @@ class OpenMLRun(object):
                                  '%s\nmodel parameters: %s' % (
                     sorted(expected_parameters| expected_components), sorted(model_parameters)))
 
+            if _flow.class_name.split('.')[0] == "sklearn":
+                converter = openml.flows.SKLearnConverter._sklearn_to_flow
+            elif _flow.class_name.split('.')[0] == "shogun":
+                converter = openml.flows.ShogunConverter._shogun_to_flow
+            else:
+                raise ValueError("Unknown backend library: {}".format(_flow.class_name.split('.')[0]))
+
             _params = []
             for _param_name in _flow.parameters:
                 _current = OrderedDict()
                 _current['oml:name'] = _param_name
 
-                _tmp = openml.flows.sklearn_to_flow(
+                _tmp = converter(
                     component_model.get_params()[_param_name])
 
                 # Try to filter out components (a.k.a. subflows) which are

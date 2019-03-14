@@ -62,8 +62,6 @@ class ShogunConverter(AbstractConverter):
     @staticmethod
     def _flow_to_shogun(o, components=None, initialize_with_defaults=False):
 
-        print(o, components)
-
         if isinstance(o, six.string_types):
             try:
                 o = json.loads(o)
@@ -78,7 +76,6 @@ class ShogunConverter(AbstractConverter):
                 value = o['value']
                 key = o["key"]
                 if serialized_type == 'function':
-                    print("deserialize function")
                     rval = ShogunConverter._deserialize_model(
                         components[key], initialize_with_defaults)
                     return rval
@@ -89,7 +86,7 @@ class ShogunConverter(AbstractConverter):
         elif isinstance(o, OpenMLFlow):
             rval = ShogunConverter._deserialize_model(o, initialize_with_defaults)
         elif isinstance(o, list):
-            print("is list", o)
+            rval = None
         elif isinstance(o, (np.ndarray, np.generic)):
             rval = o
         else:
@@ -97,9 +94,14 @@ class ShogunConverter(AbstractConverter):
         return rval
 
     @staticmethod
-    def _shogun_deserialize_function(component, initialize_with_defaults=True):
+    def _shogun_deserialize_function(component, initialize_with_defaults=False):
         return ShogunConverter._flow_to_shogun(component,
+
                                                initialize_with_defaults=initialize_with_defaults)
+    @staticmethod
+    def get_model_class(flow):
+        module_name = flow.class_name.rsplit('.', 1)
+        return functools.partial(eval(module_name[0]), module_name[1])
 
     def to_flow(self):
         """Creates an OpenML flow of the models.
@@ -109,7 +111,8 @@ class ShogunConverter(AbstractConverter):
         OpenMLFlow
         """
 
-        class_name = "{}.{}".format("shogun", self._model.get_name())
+        class_name = "{}.{}.{}".format("shogun", type(self._model).__name__.lower(),
+                                       self._model.get_name())
         name = class_name
 
         dependencies = [self.format_external_version('shogun', sg.__version__),
@@ -134,34 +137,61 @@ class ShogunConverter(AbstractConverter):
                           # TODO fill in dependencies!
                           dependencies=dependencies)
 
+    def extract_information_from_model(self):
+        """
+        Extract information from shogun model.
+        Populates self._parameters, a OrderedDict with
+        the parameter names and corresponding values of
+        the model, and self._parameters_meta_info which
+        has a description and the data type of each
+        parameter
+        """
+
+        model_parameters = self._model.get_params()
+
+        for param_name, param_value in sorted(model_parameters.items(), key=lambda t: t[0]):
+            rval = self._shogun_to_flow(param_value, self._model)
+            if isinstance(rval, OpenMLFlow):
+                self._extract_openml_flow_information(rval, param_name)
+
+            else:
+                if not (hasattr(rval, '__len__') and len(rval) == 0):
+                    rval = json.dumps(rval)
+                    self._parameters[param_name] = rval
+                else:
+                    self._parameters[param_name] = None
+
+            # self._parameters_meta_info[param_name] = \
+            #     OrderedDict((('description', self._model.parameter_description(param_name)),
+            #                  ('data_type', self._model.parameter_type(param_name))))
+            # TODO: descriptions can cause issues with upload so ignore for now
+            self._parameters_meta_info[param_name] = OrderedDict((('description', None),
+                                                         ('data_type', self._model.parameter_type(param_name))))
+
     @staticmethod
-    def _shogun_to_flow(model, name):
+    def _shogun_to_flow(o, parent_model=None):
         """
         Returns the rvalue of name from self._model
         if there is a getter that can handle it
         """
 
-        # first need to check if value can be returned
-        # via shogun's python API
-        try:
-            value = model.get(name)
-        except ValueError as e:
-            # couldn't get it
-            warnings.warn(str(e))
-            return None
-
-        param_type = model.parameter_type(name)
-
         # is it a model? If so recursive call
-        if ShogunConverter._is_shogun_trainable_model(value):
-            rval = ShogunConverter(value).to_flow()
-        elif model.parameter_is_sg_base(name):
-            rval = ShogunConverter(value).to_flow()
+        if ShogunConverter._is_shogun_trainable_model(o):
+            rval = ShogunConverter(o).to_flow()
+        if ShogunConverter._is_sg_base(o):
+            rval = ShogunConverter(o).to_flow()
+        elif isinstance(o, (float, str, int)) or o is None:
+            rval = o
             # rval = [ShogunConverter._shogun_to_flow(value, name)
             # for name in value.parameter_names()]
         # handle primitive types
+        elif isinstance(o, np.ndarray):
+            # rval = [ShogunConverter._flow_to_shogun(o_i) for o_i in o]
+            rval = None
         else:
-            rval = value
+            # warnings.warn("Not implemented for type {}".format(type(o)))
+            rval = None
+            # raise ValueError("Not implemented for type {}".format(type(o)))
 
         return rval
 
@@ -179,34 +209,6 @@ class ShogunConverter(AbstractConverter):
         component_reference['key'] = parameter_name
         component_reference['value'] = "shogun.{}".format(parameter_name)
         self._parameters[parameter_name] = json.dumps(component_reference)
-
-    def extract_information_from_model(self):
-        """
-        Extract information from shogun model.
-        Populates self._parameters, a OrderedDict with
-        the parameter names and corresponding values of
-        the model, and self._parameters_meta_info which
-        has a description and the data type of each
-        parameter
-        """
-
-        for param_name in sorted(self._model.parameter_names()):
-            rval = self._shogun_to_flow(self._model, param_name)
-
-            # if not (hasattr(rval, '__len__') and len(rval) == 0):
-            #     # rval = json.dumps(rval)
-            #     self._parameters[param_name] = rval
-            # else:
-            #     self._parameters[param_name] = None
-            if isinstance(rval, OpenMLFlow):
-                self._extract_openml_flow_information(rval, param_name)
-            else:
-                self._parameters[param_name] = rval
-
-            self._parameters_meta_info[param_name] = \
-                OrderedDict((('description', self._model.parameter_description(param_name)),
-                             ('data_type', self._model.parameter_type(param_name))))
-        # raise NotImplementedError("")
 
     @staticmethod
     def _is_shogun_trainable_model(obj):
@@ -234,3 +236,7 @@ class ShogunConverter(AbstractConverter):
         external_versions = list(sorted(external_versions))
         self._external_version = ','.join(external_versions)
         return self._external_version
+
+    @staticmethod
+    def _is_sg_base(obj):
+        return isinstance(obj, (sg.Kernel, sg.Distance))

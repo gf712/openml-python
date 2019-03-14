@@ -286,6 +286,12 @@ class SKLearnConverter(AbstractConverter):
             self._parameters_meta_info[k] = OrderedDict((('description', None),
                                                          ('data_type', None)))
 
+    @staticmethod
+    def get_model_class(flow):
+        module_name = flow.class_name.rsplit('.', 1)
+        return getattr(importlib.import_module(module_name[0]),
+                              module_name[1])
+
     def _extract_sklearn_model_information(self, rval, parameter_name):
         # Steps in a pipeline or feature union, or base classifiers in voting classifier
         parameter_value = list()
