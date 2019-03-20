@@ -393,17 +393,21 @@ def _prediction_to_row(rep_no, fold_no, sample_no, row_id, correct_label,
     if not isinstance(fold_no, (int, np.integer)): raise ValueError('fold_no should be int')
     if not isinstance(sample_no, (int, np.integer)): raise ValueError('sample_no should be int')
     if not isinstance(row_id, (int, np.integer)): raise ValueError('row_id should be int')
-    if not len(predicted_probabilities) == len(model_classes_mapping):
-        raise ValueError('len(predicted_probabilities) != len(class_labels)')
 
     arff_line = [rep_no, fold_no, sample_no, row_id]
-    for class_label_idx in range(len(class_labels)):
-        if class_label_idx in model_classes_mapping:
-            index = np.where(model_classes_mapping == class_label_idx)[0][0]  # TODO: WHY IS THIS 2D???
-            arff_line.append(predicted_probabilities[index])
-        else:
-            arff_line.append(0.0)
-    arff_line.append(class_labels[int(predicted_label)])
+
+    if class_labels == "REAL":
+        arff_line.append(predicted_label)
+    else:
+        if not len(predicted_probabilities) == len(model_classes_mapping):
+            raise ValueError('len(predicted_probabilities) != len(class_labels)')
+        for class_label_idx in range(len(class_labels)):
+            if class_label_idx in model_classes_mapping:
+                index = np.where(model_classes_mapping == class_label_idx)[0][0]  # TODO: WHY IS THIS 2D???
+                arff_line.append(predicted_probabilities[index])
+            else:
+                arff_line.append(0.0)
+        arff_line.append(class_labels[int(predicted_label)])
     arff_line.append(correct_label)
     return arff_line
 
@@ -575,7 +579,7 @@ def _run_model_on_fold(model, task, rep_no, fold_no, sample_no, can_measure_runt
                 learning_type = model.get_machine_problem_type()
                 if learning_type == 0:
                     # binary
-                    model.put("labels", sg.BinaryLabels(trainY.astype(np.float64)))
+                    model.put("labels", sg.labels(trainY.astype(np.float64)))
                 elif learning_type == 1:
                     #regression
                     model.put("labels", sg.RegressionLabels(trainY.astype(np.float64)))
@@ -621,22 +625,29 @@ def _run_model_on_fold(model, task, rep_no, fold_no, sample_no, can_measure_runt
         used_estimator = model
         # first .get("labels") gets SGObject
         # second .get("labels") gets numpy array
-        model_classes = model.get("labels").get("labels")
+        model_classes = np.array(list(set(model.get("labels").get("labels"))))
 
     if can_measure_runtime:
         modelpredict_starttime = time.process_time()
 
     if hasattr(model, "fit"):
         PredY = model.predict(testX)
+        try:
+            ProbaY = model.predict_proba(testX)
+        except AttributeError:
+            ProbaY = _prediction_to_probabilities(PredY, list(model_classes))
     else:
-        PredY = model.apply(sg.features(testX.T.astype(np.float64))).get("labels")
+        labels = model.apply(sg.features(testX.T.astype(np.float64)))
+        PredY = labels.get("labels")
+        # for binary labels convert -1 to 0
+        if model.get_machine_problem_type() == 0:
+            PredY[PredY==-1] = 0
+        if model.get_machine_problem_type() != 1:
+            ProbaY = _prediction_to_probabilities(PredY, list(model_classes))
+        else:
+            ProbaY = None
 
-    try:
-        ProbaY = model.predict_proba(testX)
-    except AttributeError:
-        ProbaY = _prediction_to_probabilities(PredY, list(model_classes))
-
-    if ProbaY.shape[1] != len(task.class_labels):
+    if ProbaY is not None and ProbaY.shape[1] != len(task.class_labels):
         warnings.warn("Repeat %d Fold %d: estimator only predicted for %d/%d classes!" % (
             rep_no, fold_no, ProbaY.shape[1], len(task.class_labels)))
 
@@ -654,9 +665,14 @@ def _run_model_on_fold(model, task, rep_no, fold_no, sample_no, can_measure_runt
 
     arff_datacontent = []
     for i in range(0, len(test_indices)):
-        arff_line = _prediction_to_row(rep_no, fold_no, sample_no,
-                                       test_indices[i], task.class_labels[testY[i]],
-                                       PredY[i], ProbaY[i], task.class_labels, model_classes)
+        if task.class_labels == "REAL":
+            arff_line = _prediction_to_row(rep_no, fold_no, sample_no,
+                                           test_indices[i], testY[i],
+                                           PredY[i], PredY[i], task.class_labels, model_classes)
+        else:
+            arff_line = _prediction_to_row(rep_no, fold_no, sample_no,
+                                           test_indices[i], task.class_labels[testY[i]],
+                                           PredY[i], ProbaY[i], task.class_labels, model_classes)
         arff_datacontent.append(arff_line)
     return arff_datacontent, arff_tracecontent, user_defined_measures, model
 
